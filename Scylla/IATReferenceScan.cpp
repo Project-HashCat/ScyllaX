@@ -1,6 +1,7 @@
-#include "IATReferenceScan.h"
+﻿#include "IATReferenceScan.h"
 #include "Scylla.h"
 #include "Architecture.h"
+#include "XDbgBridge.h"
 #include <set>
 
 //#define DEBUG_COMMENTS
@@ -66,7 +67,21 @@ void IATReferenceScan::startScan(DWORD_PTR imageBase, DWORD imageSize, DWORD_PTR
 		iatDirectImportList.reserve(50);
 	}
 
-
+    if (XDbgBridge::IsEnabled())
+    {
+        // Bridge mode: hProcess is not a real process handle. Walk the debuggee image
+        // through the bridge instead of VirtualQueryEx. Chunking avoids giant allocations.
+        const SIZE_T chunkSize = 0x10000;
+        DWORD_PTR section = imageBase;
+        DWORD_PTR end = imageBase + imageSize;
+        while (section < end)
+        {
+            SIZE_T todo = (SIZE_T)((end - section) > chunkSize ? chunkSize : (end - section));
+            scanMemoryPage((PVOID)section, todo);
+            section += todo;
+        }
+        return;
+    }
 
 	DWORD_PTR section = imageBase;
 
@@ -282,6 +297,13 @@ void IATReferenceScan::getIatEntryAddress( IATReference * ref )
 
 bool IATReferenceScan::isAddressValidImageMemory( DWORD_PTR address )
 {
+    if (XDbgBridge::IsEnabled())
+    {
+        DWORD_PTR regionBase = 0;
+        SIZE_T regionSize = 0;
+        return ProcessAccessHelp::getMemoryRegionFromAddress(address, &regionBase, &regionSize) && regionBase && regionSize;
+    }
+
 	MEMORY_BASIC_INFORMATION memBasic = {0};
 
 	if (!VirtualQueryEx(ProcessAccessHelp::hProcess, (LPCVOID)address, &memBasic, sizeof(MEMORY_BASIC_INFORMATION)))

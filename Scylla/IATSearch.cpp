@@ -1,6 +1,7 @@
-#include "IATSearch.h"
+﻿#include "IATSearch.h"
 #include "Scylla.h"
 #include "Architecture.h"
+#include "XDbgBridge.h"
 
 
 //#define DEBUG_COMMENTS
@@ -409,6 +410,24 @@ void IATSearch::findExecutableMemoryPagesByStartAddress( DWORD_PTR startAddress,
 	*memorySize = 0;
 	*baseAddress = 0;
 
+    if (XDbgBridge::IsEnabled())
+    {
+        // In bridge-only mode hProcess is a sentinel, so VirtualQueryEx would query ScyllaX.exe
+        // or fail. Scan the current debuggee image through the bridge instead.
+        if (targetImageBase && targetSizeOfImage &&
+            startAddress >= targetImageBase && startAddress < (targetImageBase + targetSizeOfImage))
+        {
+            *baseAddress = targetImageBase;
+            *memorySize = targetSizeOfImage;
+            return;
+        }
+
+        if (getMemoryRegionFromAddress(startAddress, baseAddress, memorySize))
+            return;
+
+        return;
+    }
+
 	if (VirtualQueryEx(hProcess,(LPCVOID)startAddress, &memBasic, sizeof(MEMORY_BASIC_INFORMATION)) != sizeof(MEMORY_BASIC_INFORMATION))
 	{
 #ifdef DEBUG_COMMENTS
@@ -554,6 +573,28 @@ void IATSearch::getMemoryBaseAndSizeForIat( DWORD_PTR address, DWORD_PTR* baseAd
     DWORD_PTR start = 0, end = 0;
     *baseAddress = 0;
     *baseSize = 0;
+
+    if (XDbgBridge::IsEnabled())
+    {
+        SIZE_T regionSize = 0;
+        if (getMemoryRegionFromAddress(address, baseAddress, &regionSize))
+        {
+            if (regionSize > 0xFFFFFFFFull)
+                regionSize = 0xFFFFFFFFull;
+            *baseSize = (DWORD)regionSize;
+            adjustSizeForBigSections(baseSize);
+            return;
+        }
+
+        if (targetImageBase && targetSizeOfImage &&
+            address >= targetImageBase && address < (targetImageBase + targetSizeOfImage))
+        {
+            *baseAddress = targetImageBase;
+            *baseSize = (DWORD)targetSizeOfImage;
+            adjustSizeForBigSections(baseSize);
+        }
+        return;
+    }
 
     if (!VirtualQueryEx(hProcess,(LPCVOID)address, &memBasic2, sizeof(MEMORY_BASIC_INFORMATION)))
     {

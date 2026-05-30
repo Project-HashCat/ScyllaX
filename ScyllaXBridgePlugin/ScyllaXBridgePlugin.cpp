@@ -1,4 +1,4 @@
-#include <windows.h>
+﻿#include <windows.h>
 #include <vector>
 #include <string>
 #include <algorithm>
@@ -138,6 +138,35 @@ static const WCHAR* fileNameOnly(const WCHAR* path)
     return slash ? slash + 1 : path;
 }
 
+static bool safeDbgRead(duint address, void* buffer, size_t size)
+{
+    if(!buffer || !size)
+        return false;
+
+    BYTE* out = (BYTE*)buffer;
+    size_t done = 0;
+    bool allOk = true;
+
+    while(done < size)
+    {
+        duint cur = address + (duint)done;
+        size_t pageLeft = 0x1000 - ((size_t)cur & 0xFFF);
+        size_t chunk = min(pageLeft, size - done);
+
+        if(!DbgMemRead(cur, out + done, (duint)chunk))
+        {
+            memset(out + done, 0, chunk);
+            allOk = false;
+        }
+
+        done += chunk;
+    }
+
+    // Return true with zero-filled holes. Scylla often scans full image ranges,
+    // and native ReadProcessMemory callers used partial-read fallback behavior.
+    return true;
+}
+
 static bool buildProcessInfo(XDbgProcessInfoWire& info)
 {
     ZeroMemory(&info, sizeof(info));
@@ -247,8 +276,7 @@ static void servePipe(HANDLE pipe)
         {
             DWORD size = (DWORD)req.b;
             std::vector<BYTE> data(size);
-            duint read = 0;
-            bool ok = size != 0 && Script::Memory::Read((duint)req.a, &data[0], size, &read) && read == size;
+            bool ok = size != 0 && safeDbgRead((duint)req.a, &data[0], size);
             sendReply(pipe, req.command, ok, ok ? &data[0] : nullptr, ok ? size : 0);
             break;
         }

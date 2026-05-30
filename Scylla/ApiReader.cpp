@@ -1,5 +1,6 @@
-
+﻿
 #include "ApiReader.h"
+#include "XDbgBridge.h"
 
 #include "Scylla.h"
 #include "Architecture.h"
@@ -1234,8 +1235,25 @@ bool ApiReader::isInvalidMemoryForIat( DWORD_PTR address )
     if (address == 0)
         return true;
 
-   if (address == -1)
+   if (address == (DWORD_PTR)-1)
        return true;
+
+   if (XDbgBridge::IsEnabled())
+   {
+       // Bridge-only mode cannot use VirtualQueryEx on the local ScyllaX process.
+       // Ask x64dbg for the target memory region, then verify that at least one byte is readable.
+       DWORD_PTR regionBase = 0;
+       SIZE_T regionSize = 0;
+       BYTE probe = 0;
+
+       if (!ProcessAccessHelp::getMemoryRegionFromAddress(address, &regionBase, &regionSize))
+           return true;
+
+       if (!regionBase || !regionSize)
+           return true;
+
+       return !ProcessAccessHelp::readMemoryFromProcess(address, sizeof(probe), &probe);
+   }
 
    MEMORY_BASIC_INFORMATION memBasic = {0};
 
