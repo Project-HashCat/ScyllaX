@@ -163,7 +163,7 @@ static bool buildModuleList(std::vector<XDbgModuleInfoWire>& out)
 {
     out.clear();
 
-    BridgeList modules;
+    BridgeList<Script::Module::ModuleInfo> modules;
     if(!Script::Module::GetList(&modules))
         return false;
 
