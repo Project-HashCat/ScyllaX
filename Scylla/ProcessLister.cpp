@@ -159,9 +159,10 @@ bool ProcessLister::getAbsoluteFilePath(HANDLE hProcess, Process * process)
 
 std::vector<Process>& ProcessLister::getProcessListSnapshotNative()
 {
+    processList.clear();
+
     if (XDbgBridge::IsEnabled())
     {
-        processList.clear();
         processList.reserve(1);
 
         XDbgProcessInfoWire info;
@@ -183,6 +184,9 @@ std::vector<Process>& ProcessLister::getProcessListSnapshotNative()
         }
         return processList;
     }
+
+    // ScyllaX is bridge-only. Never enumerate native system processes.
+    return processList;
 
     ULONG retLength = 0;
     ULONG bufferLength = 1;

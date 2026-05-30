@@ -22,7 +22,15 @@ int InitializeGui(HINSTANCE hInstance, LPARAM param);
 int APIENTRY _tWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
 {
 	AddExceptionHandler();
-    XDbgBridge::ConnectFromCommandLine(lpCmdLine);
+
+    if(!XDbgBridge::ConnectFromCommandLine(lpCmdLine))
+    {
+        MessageBoxW(NULL,
+            L"ScyllaX is bridge-only.\r\n\r\nStart it from x64dbg/x32dbg via:\r\nPlugins -> ScyllaXBridge -> Open ScyllaX UI",
+            L"ScyllaX",
+            MB_ICONERROR | MB_OK);
+        return 1;
+    }
 
 	return InitializeGui(hInstance, (LPARAM)0);
 }

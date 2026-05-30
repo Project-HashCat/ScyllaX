@@ -141,23 +141,32 @@ BOOL MainGui::OnInitDialog(CWindow wndFocus, LPARAM lInitParam)
 
 	Scylla::windowLog.setWindow(ListLog);
 
+    // ScyllaX is bridge-only: never allow selecting/attaching arbitrary processes.
+    ComboProcessList.EnableWindow(FALSE);
+    GetDlgItem(IDC_BTN_PICKDLL).EnableWindow(FALSE);
+	Scylla::windowLog.log(L"ScyllaX bridge-only mode: process/module source is x64dbg/x32dbg only.");
+
 	appendPluginListToMenu(hMenuImports.GetSubMenu(0));
 	appendPluginListToMenu(CMenuHandle(GetMenu()).GetSubMenu(MenuImportsOffsetTrace));
 
 	enableDialogControls(FALSE);
 	setIconAndDialogCaption();
 
-	if (lInitParam)
+	if (lInitParam && !XDbgBridge::IsEnabled())
 	{
 		InitDllStartWithPreSelect((PGUI_DLL_PARAMETER)lInitParam);
 	}
-    else if (XDbgBridge::IsEnabled())
+    else
     {
         fillProcessListComboBox(ComboProcessList);
         if (ComboProcessList.GetCount() > 0)
         {
             ComboProcessList.SetCurSel(0);
             processSelectedActionHandler(0);
+        }
+        else
+        {
+            Scylla::windowLog.log(L"Error: no x64dbg/x32dbg debuggee available through bridge.");
         }
     }
 	return TRUE;
@@ -271,21 +280,23 @@ void MainGui::OnTreeImportsSubclassChar(UINT nChar, UINT nRepCnt, UINT nFlags)
 
 void MainGui::OnProcessListDrop(UINT uNotifyCode, int nID, CWindow wndCtl)
 {
-	fillProcessListComboBox(ComboProcessList);
+    // Bridge-only: the combo is display-only and must not refresh native processes.
+    if(!XDbgBridge::IsEnabled())
+        return;
 }
 
 void MainGui::OnProcessListSelected(UINT uNotifyCode, int nID, CWindow wndCtl)
 {
-	int index = ComboProcessList.GetCurSel();
-	if (index != CB_ERR)
-	{
-		processSelectedActionHandler(index);
-	}
+    // Bridge-only: ignore user selection. The first/only item is the x64dbg debuggee.
+    if(!XDbgBridge::IsEnabled())
+        return;
 }
 
 void MainGui::OnPickDLL(UINT uNotifyCode, int nID, CWindow wndCtl)
 {
-	pickDllActionHandler();
+    // Disabled in bridge-only mode. Dump target is always the main debuggee module.
+    if(!XDbgBridge::IsEnabled())
+        pickDllActionHandler();
 }
 
 void MainGui::OnOptions(UINT uNotifyCode, int nID, CWindow wndCtl)
@@ -533,6 +544,12 @@ void MainGui::setIconAndDialogCaption()
 
 void MainGui::pickDllActionHandler()
 {
+    if(XDbgBridge::IsEnabled())
+    {
+        Scylla::windowLog.log(L"Pick DLL is disabled in bridge-only mode. Target module comes from x64dbg/x32dbg.");
+        return;
+    }
+
 	if(!selectedProcess)
 		return;
 
@@ -604,6 +621,13 @@ void MainGui::startDisassemblerGui(CTreeItem selectedTreeNode)
 
 void MainGui::processSelectedActionHandler(int index)
 {
+    if(!XDbgBridge::IsEnabled())
+    {
+        Scylla::windowLog.log(L"Error: ScyllaX refuses native process attach. Start through x64dbg/x32dbg bridge.");
+        enableDialogControls(FALSE);
+        return;
+    }
+
 	std::vector<Process>& processList = Scylla::processLister.getProcessList();
 	Process &process = processList.at(index);
 	selectedProcess = 0;
@@ -661,11 +685,14 @@ void MainGui::fillProcessListComboBox(CComboBox& hCombo)
 {
 	hCombo.ResetContent();
 
+    if(!XDbgBridge::IsEnabled())
+        return;
+
 	std::vector<Process>& processList = Scylla::processLister.getProcessListSnapshotNative();
 
 	for (size_t i = 0; i < processList.size(); i++)
 	{
-		swprintf_s(stringBuffer, L"%04d - %s - %s", processList[i].PID, processList[i].filename, processList[i].fullPath);
+		swprintf_s(stringBuffer, L"BRIDGE - %s - %s", processList[i].filename, processList[i].fullPath);
 		hCombo.AddString(stringBuffer);
 	}
 }

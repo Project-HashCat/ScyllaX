@@ -37,6 +37,9 @@ bool ProcessAccessHelp::openProcessHandle(DWORD dwPID)
         return true;
     }
 
+    // ScyllaX is bridge-only. Never fall back to OpenProcess/NtOpenProcess.
+    return false;
+
 	if (dwPID > 0)
 	{
 		if (hProcess)
