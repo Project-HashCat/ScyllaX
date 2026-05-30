@@ -1,0 +1,150 @@
+name: Build ScyllaX
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: windows-2022
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: x64
+            artifact_name: ScyllaX-x64
+            plugin_ext: dp64
+          - platform: Win32
+            artifact_name: ScyllaX-x86
+            plugin_ext: dp32
+
+    steps:
+      - name: Checkout repo and submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
+
+      - name: Prepare dependency folders
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "_deps" | Out-Null
+
+          # WTL：如果你已经用 submodule 放好了 WTL，就不会重新 clone
+          if (!(Test-Path "WTL\Include\atlapp.h")) {
+            Write-Host "[deps] WTL missing, cloning..."
+            git clone --depth 1 https://github.com/Win32-WTL/WTL.git WTL
+          }
+
+          # TinyXML legacy：Scylla 老代码用 tinyxml，不是 tinyxml2
+          if (!(Test-Path "tinyxml\tinyxml.cpp")) {
+            Write-Host "[deps] TinyXML missing, cloning and copying..."
+            git clone --depth 1 https://github.com/lucasg/tinyxml.git "_deps\tinyxml"
+            Copy-Item "_deps\tinyxml\tiny*.cpp" "tinyxml\" -Force
+            Copy-Item "_deps\tinyxml\tiny*.h" "tinyxml\" -Force
+          }
+
+      - name: Download x64dbg plugin SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          New-Item -ItemType Directory -Force -Path "ScyllaXBridgePlugin\pluginsdk" | Out-Null
+          New-Item -ItemType Directory -Force -Path "_deps\x64dbg" | Out-Null
+
+          Write-Host "[deps] Query latest x64dbg release..."
+          $release = Invoke-RestMethod "https://api.github.com/repos/x64dbg/x64dbg/releases/latest"
+
+          # 优先找独立 pluginsdk 包，没有就找 snapshot 包
+          $asset = $release.assets | Where-Object {
+            $_.name -match "pluginsdk.*\.zip$"
+          } | Select-Object -First 1
+
+          if ($null -eq $asset) {
+            $asset = $release.assets | Where-Object {
+              $_.name -match "snapshot.*\.zip$"
+            } | Select-Object -First 1
+          }
+
+          if ($null -eq $asset) {
+            Write-Host "[deps] GitHub release asset not found, fallback to SourceForge mirror..."
+            $url = "https://sourceforge.net/projects/x64dbg.mirror/files/2025.08.19/x64dbg-pluginsdk.zip/download"
+          } else {
+            $url = $asset.browser_download_url
+          }
+
+          Write-Host "[deps] Downloading x64dbg SDK from $url"
+          Invoke-WebRequest -Uri $url -OutFile "_deps\x64dbg_sdk.zip"
+
+          Expand-Archive "_deps\x64dbg_sdk.zip" "_deps\x64dbg" -Force
+
+          $pluginsdk = Get-ChildItem "_deps\x64dbg" -Recurse -Filter "_plugins.h" |
+            Select-Object -First 1 |
+            ForEach-Object { $_.Directory.FullName }
+
+          if (!$pluginsdk) {
+            throw "Cannot find _plugins.h in downloaded x64dbg SDK."
+          }
+
+          Write-Host "[deps] Found pluginsdk: $pluginsdk"
+          Copy-Item "$pluginsdk\*" "ScyllaXBridgePlugin\pluginsdk\" -Recurse -Force
+
+      - name: Retarget old VS projects to VS2022
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Get-ChildItem -Recurse -Include *.vcxproj,*.props,*.targets | ForEach-Object {
+            $p = $_.FullName
+            $s = [IO.File]::ReadAllText($p)
+
+            # v90 / v100 / v120 / v143 全部干成 v143
+            $s = $s -replace '<PlatformToolset>v[0-9]+</PlatformToolset>', '<PlatformToolset>v143</PlatformToolset>'
+
+            # 防止写死旧 Windows SDK
+            $s = $s -replace '<WindowsTargetPlatformVersion>[^<]+</WindowsTargetPlatformVersion>', ''
+
+            [IO.File]::WriteAllText($p, $s, [Text.UTF8Encoding]::new($true))
+            Write-Host "[patch] $p"
+          }
+
+      - name: Build solution
+        shell: cmd
+        run: |
+          msbuild Scylla.sln /m /restore ^
+            /p:Configuration=Release ^
+            /p:Platform=${{ matrix.platform }} ^
+            /p:PlatformToolset=v143
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "artifacts" | Out-Null
+
+          Get-ChildItem -Recurse -Include *.exe,*.dll,*.dp32,*.dp64,*.pdb |
+            Where-Object {
+              $_.FullName -match "\\Release\\" -or
+              $_.Name -match "ScyllaX|Scylla|Bridge"
+            } |
+            ForEach-Object {
+              Write-Host "[artifact] $($_.FullName)"
+              Copy-Item $_.FullName "artifacts\" -Force
+            }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: artifacts/*
