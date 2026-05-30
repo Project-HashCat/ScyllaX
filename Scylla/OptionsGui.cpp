@@ -1,5 +1,31 @@
-#include "OptionsGui.h"
+﻿#include "OptionsGui.h"
 #include "Scylla.h"
+#include "XDbgBridge.h"
+
+static void ApplyBridgeOnlyOptionDefaults()
+{
+    if(!XDbgBridge::IsEnabled())
+        return;
+
+    Scylla::config[IAT_SECTION_NAME].setString(L".SCY");
+    Scylla::config[IAT_FIX_AND_OEP_FIX].setTrue();
+    Scylla::config[OriginalFirstThunk_SUPPORT].setTrue();
+    Scylla::config[SCAN_DIRECT_IMPORTS].setTrue();
+    Scylla::config[FIX_DIRECT_IMPORTS_UNIVERSAL].setTrue();
+    Scylla::config[UPDATE_HEADER_CHECKSUM].setTrue();
+    Scylla::config[CREATE_BACKUP].setTrue();
+    Scylla::config[USE_PE_HEADER_FROM_DISK].setTrue();
+    Scylla::config[DEBUG_PRIVILEGE].setTrue();
+    Scylla::config[USE_ADVANCED_IAT_SEARCH].setTrue();
+    Scylla::config[APIS_ALWAYS_FROM_DISK].setTrue();
+
+    Scylla::config[CREATE_NEW_IAT_IN_SECTION].setFalse();
+    Scylla::config[DONT_CREATE_NEW_SECTION].setFalse();
+    Scylla::config[FIX_DIRECT_IMPORTS_NORMAL].setFalse();
+    Scylla::config[REMOVE_DOS_HEADER_STUB].setFalse();
+    Scylla::config[DLL_INJECTION_AUTO_UNLOAD].setFalse();
+    Scylla::config[SUSPEND_PROCESS_FOR_DUMPING].setFalse();
+}
 
 BOOL OptionsGui::OnInitDialog(CWindow wndFocus, LPARAM lInitParam)
 {
@@ -29,6 +55,12 @@ void OptionsGui::OnCancel(UINT uNotifyCode, int nID, CWindow wndCtl)
 
 void OptionsGui::saveOptions() const
 {
+    if(XDbgBridge::IsEnabled())
+    {
+        ApplyBridgeOnlyOptionDefaults();
+        return;
+    }
+
 	Scylla::config[USE_PE_HEADER_FROM_DISK].setBool(usePEHeaderFromDisk);
 	Scylla::config[DEBUG_PRIVILEGE].setBool(debugPrivilege);
 	Scylla::config[CREATE_BACKUP].setBool(createBackup);
@@ -50,6 +82,8 @@ void OptionsGui::saveOptions() const
 
 void OptionsGui::loadOptions()
 {
+    ApplyBridgeOnlyOptionDefaults();
+
 	usePEHeaderFromDisk    = Scylla::config[USE_PE_HEADER_FROM_DISK].getBool();
 	debugPrivilege         = Scylla::config[DEBUG_PRIVILEGE].getBool();
 	createBackup           = Scylla::config[CREATE_BACKUP].getBool();

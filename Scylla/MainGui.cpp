@@ -670,7 +670,7 @@ void MainGui::processSelectedActionHandler(int index)
 	if (!XDbgBridge::IsEnabled() || process.entryPoint == 0)
         process.entryPoint = ProcessAccessHelp::getEntryPointFromFile(process.fullPath);
 
-    if (XDbgBridge::IsEnabled() && process.currentIp)
+    if (XDbgBridge::IsEnabled() && process.currentIp >= process.imageBase && process.currentIp < process.imageBase + process.imageSize)
         EditOEPAddress.SetValue(process.currentIp);
     else
 	    EditOEPAddress.SetValue(process.entryPoint + process.imageBase);

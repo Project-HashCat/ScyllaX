@@ -53,6 +53,23 @@ void ApiReader::parseModule(ModuleInfo *module)
 {
 	module->parsing = true;
 
+    if (XDbgBridge::IsEnabled())
+    {
+        // In bridge-only mode do not rely on local LoadLibrary/Toolhelp state.
+        // Prefer exports parsed from the DLL file path received from x64dbg;
+        // if the file path is unavailable or unmappable, fall back to reading
+        // the export directory from the debuggee through the bridge.
+        if (module->fullPath[0] && wcsstr(module->fullPath, L"\\") != 0)
+            parseModuleWithMapping(module);
+
+        if (module->apiList.empty())
+            parseModuleWithProcess(module);
+
+        module->isAlreadyParsed = true;
+        module->parsing = false;
+        return;
+    }
+
 	if (isWinSxSModule(module))
 	{
 		parseModuleWithMapping(module);
@@ -74,6 +91,7 @@ void ApiReader::parseModule(ModuleInfo *module)
 	}
 	
 	module->isAlreadyParsed = true;
+    module->parsing = false;
 }
 
 void ApiReader::parseModuleWithMapping(ModuleInfo *moduleInfo)
@@ -82,22 +100,36 @@ void ApiReader::parseModuleWithMapping(ModuleInfo *moduleInfo)
 	PIMAGE_NT_HEADERS pNtHeader = 0;
 	PIMAGE_DOS_HEADER pDosHeader = 0;
 
+    if(!moduleInfo || !moduleInfo->fullPath[0])
+        return;
+
 	fileMapping = createFileMappingViewRead(moduleInfo->fullPath);
 
 	if (fileMapping == 0)
 		return;
 
-	pDosHeader = (PIMAGE_DOS_HEADER)fileMapping;
-	pNtHeader = (PIMAGE_NT_HEADERS)((DWORD_PTR)fileMapping + (DWORD_PTR)(pDosHeader->e_lfanew));
+    __try
+    {
+	    pDosHeader = (PIMAGE_DOS_HEADER)fileMapping;
+        if(pDosHeader->e_magic != IMAGE_DOS_SIGNATURE || pDosHeader->e_lfanew <= 0 || pDosHeader->e_lfanew > 0x100000)
+        {
+            UnmapViewOfFile(fileMapping);
+            return;
+        }
 
-	if (isPeAndExportTableValid(pNtHeader))
-	{
-		parseExportTable(moduleInfo, pNtHeader, (PIMAGE_EXPORT_DIRECTORY)((DWORD_PTR)fileMapping + pNtHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress), (DWORD_PTR)fileMapping);
-	}
+	    pNtHeader = (PIMAGE_NT_HEADERS)((DWORD_PTR)fileMapping + (DWORD_PTR)(pDosHeader->e_lfanew));
 
+	    if (pNtHeader->Signature == IMAGE_NT_SIGNATURE && isPeAndExportTableValid(pNtHeader))
+	    {
+		    parseExportTable(moduleInfo, pNtHeader, (PIMAGE_EXPORT_DIRECTORY)((DWORD_PTR)fileMapping + pNtHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress), (DWORD_PTR)fileMapping);
+	    }
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER)
+    {
+        Scylla::windowLog.log(L"[ScyllaX] skipped broken export table: %s", moduleInfo->fullPath);
+    }
 
 	UnmapViewOfFile(fileMapping);
-
 }
 
 inline bool ApiReader::isApiForwarded(DWORD_PTR rva, PIMAGE_NT_HEADERS pNtHeader)
@@ -389,6 +421,12 @@ void ApiReader::parseExportTable(ModuleInfo *module, PIMAGE_NT_HEADERS pNtHeader
 	WORD i = 0, j = 0;
 	bool withoutName;
 
+    if(!module || !pNtHeader || !pExportDir)
+        return;
+    if(pExportDir->NumberOfFunctions > 0x20000 || pExportDir->NumberOfNames > 0x20000)
+        return;
+    if(!pExportDir->AddressOfFunctions || !pExportDir->NumberOfFunctions)
+        return;
 
 	addressOfFunctionsArray = (DWORD *)((DWORD_PTR)pExportDir->AddressOfFunctions + deltaAddress);
 	addressOfNamesArray = (DWORD *)((DWORD_PTR)pExportDir->AddressOfNames + deltaAddress);
@@ -753,14 +791,14 @@ ApiInfo * ApiReader::getApiByVirtualAddress(DWORD_PTR virtualAddress, bool * isS
 			return apiFound;
 	}
 
-	//is never reached
-	Scylla::windowLog.log(L"getApiByVirtualAddress :: There is a api resolving bug, VA: " PRINTF_DWORD_PTR_FULL, virtualAddress);
-	for (size_t c = 0; c < countDuplicates; c++, it1++)
-	{
-		apiFound = (ApiInfo *)((*it1).second);
-		Scylla::windowLog.log(L"-> Possible API: %S ord: %d ", apiFound->name, apiFound->ordinal);
-	}
-	return (ApiInfo *) 1; 
+	// Should not be reached, but never return a fake pointer. Old Scylla returned
+    // (ApiInfo*)1 here, which can later be dereferenced by UI/tree code and crash.
+	Scylla::windowLog.log(L"getApiByVirtualAddress :: ambiguous API, using first candidate, VA: " PRINTF_DWORD_PTR_FULL, virtualAddress);
+    it1 = apiList.find(virtualAddress);
+    if(it1 != apiList.end())
+        return (ApiInfo *)((*it1).second);
+
+	return 0;
 }
 
 ApiInfo * ApiReader::getScoredApi(stdext::hash_multimap<DWORD_PTR, ApiInfo *>::iterator it1,size_t countDuplicates, bool hasName, bool hasUnicodeAnsiName, bool hasNoUnderlineInName, bool hasPrioDll,bool hasPrio0Dll,bool hasPrio1Dll, bool hasPrio2Dll, bool firstWin )

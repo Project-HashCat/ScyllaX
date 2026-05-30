@@ -138,6 +138,32 @@ static const WCHAR* fileNameOnly(const WCHAR* path)
     return slash ? slash + 1 : path;
 }
 
+static bool hasPathSeparator(const WCHAR* path)
+{
+    return path && (wcschr(path, L'\\') || wcschr(path, L'/'));
+}
+
+static void repairModulePath(WCHAR* fullPath, size_t fullPathCount, const WCHAR* fileName)
+{
+    if(!fullPath || fullPathCount == 0)
+        return;
+
+    if(hasPathSeparator(fullPath) && GetFileAttributesW(fullPath) != INVALID_FILE_ATTRIBUTES)
+        return;
+
+    if(!fileName || !*fileName)
+        return;
+
+    WCHAR systemDir[MAX_PATH] = {0};
+    if(GetSystemDirectoryW(systemDir, _countof(systemDir)) == 0)
+        return;
+
+    WCHAR candidate[MAX_PATH] = {0};
+    swprintf_s(candidate, L"%s\\%s", systemDir, fileName);
+    if(GetFileAttributesW(candidate) != INVALID_FILE_ATTRIBUTES)
+        wcscpy_s(fullPath, fullPathCount, candidate);
+}
+
 static bool safeDbgRead(duint address, void* buffer, size_t size)
 {
     if(!buffer || !size)
@@ -205,9 +231,12 @@ static bool buildModuleList(std::vector<XDbgModuleInfoWire>& out)
         item.size = (unsigned long long)mod.size;
         item.entry = (unsigned long long)mod.entry;
         ansiToWide(mod.path, item.fullPath, _countof(item.fullPath));
+        ansiToWide(mod.name, item.filename, _countof(item.filename));
         if(!item.fullPath[0])
-            ansiToWide(mod.name, item.fullPath, _countof(item.fullPath));
-        wcscpy_s(item.filename, fileNameOnly(item.fullPath));
+            wcscpy_s(item.fullPath, item.filename);
+        repairModulePath(item.fullPath, _countof(item.fullPath), item.filename);
+        if(!item.filename[0])
+            wcscpy_s(item.filename, fileNameOnly(item.fullPath));
         out.push_back(item);
     }
 

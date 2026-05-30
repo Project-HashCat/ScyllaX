@@ -301,6 +301,8 @@ bool ProcessAccessHelp::readMemoryFromProcess(DWORD_PTR address, SIZE_T size, LP
 
 bool ProcessAccessHelp::decomposeMemory(BYTE * dataBuffer, SIZE_T bufferSize, DWORD_PTR startAddress)
 {
+    if(!dataBuffer || bufferSize == 0)
+        return false;
 
 	ZeroMemory(&decomposerCi, sizeof(_CodeInfo));
 	decomposerCi.code = dataBuffer;
@@ -325,6 +327,9 @@ bool ProcessAccessHelp::decomposeMemory(BYTE * dataBuffer, SIZE_T bufferSize, DW
 
 bool ProcessAccessHelp::disassembleMemory(BYTE * dataBuffer, SIZE_T bufferSize, DWORD_PTR startOffset)
 {
+    if(!dataBuffer || bufferSize == 0)
+        return false;
+
 	// Holds the result of the decoding.
 	_DecodeResult res;
 
@@ -713,6 +718,8 @@ bool ProcessAccessHelp::getProcessModules(HANDLE hProcess, std::vector<ModuleInf
             module.parsing = false;
             module.priority = 1;
             wcscpy_s(module.fullPath, xmods[i].fullPath[0] ? xmods[i].fullPath : xmods[i].filename);
+            if(!module.fullPath[0])
+                swprintf_s(module.fullPath, L"module_%p.dll", (void*)module.modBaseAddr);
             moduleList.push_back(module);
         }
         return true;

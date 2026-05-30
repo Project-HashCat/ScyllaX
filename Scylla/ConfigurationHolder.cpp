@@ -1,4 +1,4 @@
-#include "ConfigurationHolder.h"
+﻿#include "ConfigurationHolder.h"
 
 #include <shlwapi.h>
 #include "Architecture.h"
@@ -26,6 +26,28 @@ ConfigurationHolder::ConfigurationHolder(const WCHAR* fileName)
     config[CREATE_NEW_IAT_IN_SECTION]	=   Configuration(L"CREATE_NEW_IAT_IN_SECTION",	 Configuration::Boolean);
     config[DONT_CREATE_NEW_SECTION] 	=   Configuration(L"DONT_CREATE_NEW_SECTION",	 Configuration::Boolean);
     config[APIS_ALWAYS_FROM_DISK]	    =   Configuration(L"APIS_ALWAYS_FROM_DISK",	     Configuration::Boolean);
+
+    // ScyllaX bridge-only defaults. These match the options that are safest for
+    // an x64dbg-backed dump/rebuild workflow and avoid falling back to stale
+    // Scylla legacy defaults when ScyllaX.ini does not exist yet.
+    config[IAT_SECTION_NAME].setString(L".SCY");
+    config[IAT_FIX_AND_OEP_FIX].setTrue();
+    config[OriginalFirstThunk_SUPPORT].setTrue();
+    config[SCAN_DIRECT_IMPORTS].setTrue();
+    config[FIX_DIRECT_IMPORTS_UNIVERSAL].setTrue();
+    config[UPDATE_HEADER_CHECKSUM].setTrue();
+    config[CREATE_BACKUP].setTrue();
+    config[USE_PE_HEADER_FROM_DISK].setTrue();
+    config[DEBUG_PRIVILEGE].setTrue();
+    config[USE_ADVANCED_IAT_SEARCH].setTrue();
+    config[APIS_ALWAYS_FROM_DISK].setTrue();
+
+    config[CREATE_NEW_IAT_IN_SECTION].setFalse();
+    config[DONT_CREATE_NEW_SECTION].setFalse();
+    config[FIX_DIRECT_IMPORTS_NORMAL].setFalse();
+    config[REMOVE_DOS_HEADER_STUB].setFalse();
+    config[DLL_INJECTION_AUTO_UNLOAD].setFalse();
+    config[SUSPEND_PROCESS_FOR_DUMPING].setFalse();
 	buildConfigFilePath(fileName);
 }
 
@@ -144,8 +166,15 @@ bool ConfigurationHolder::readStringFromConfigFile(Configuration & configObject)
 
 bool ConfigurationHolder::readBooleanFromConfigFile(Configuration & configObject)
 {
-	UINT val = GetPrivateProfileInt(CONFIG_FILE_SECTION_NAME, configObject.getName(), 0, configPath);
-	configObject.setBool(val != 0);
+    WCHAR buf[8] = {0};
+    DWORD read = GetPrivateProfileString(CONFIG_FILE_SECTION_NAME, configObject.getName(), L"", buf, _countof(buf), configPath);
+    if(read == 0 || buf[0] == L'\0')
+    {
+        // Missing key: keep constructor default instead of forcing false.
+        return true;
+    }
+
+	configObject.setBool(_wtoi(buf) != 0);
 	return true;
 }
 

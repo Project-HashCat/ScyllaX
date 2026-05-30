@@ -1,4 +1,4 @@
-#include "PickApiGui.h"
+﻿#include "PickApiGui.h"
 
 #include <atlconv.h> // string conversion
 
@@ -13,6 +13,11 @@ BOOL PickApiGui::OnInitDialog(CWindow wndFocus, LPARAM lInitParam)
 	DlgResize_Init(true, true);
 	
 	fillDllComboBox(ComboDllSelect);
+    if(ComboDllSelect.GetCount() > 0)
+    {
+        ComboDllSelect.SetCurSel(0);
+        OnDllListSelected(0, 0, ComboDllSelect);
+    }
 
 	CenterWindow();
 	return TRUE;
@@ -33,8 +38,14 @@ void PickApiGui::OnDllListSelected(UINT uNotifyCode, int nID, CWindow wndCtl)
 	int indexDll = ComboDllSelect.GetCurSel();
 	if (indexDll != CB_ERR)
 	{
-		fillApiListBox(ListApiSelect, moduleList[indexDll].apiList);
-		EditApiFilter.SetWindowText(L"");
+        DWORD_PTR moduleIndex = ComboDllSelect.GetItemData(indexDll);
+        if(moduleIndex < moduleList.size())
+        {
+		    fillApiListBox(ListApiSelect, moduleList[moduleIndex].apiList);
+            if(ListApiSelect.GetCount() > 0)
+                ListApiSelect.SetCurSel(0);
+		    EditApiFilter.SetWindowText(L"");
+        }
 	}
 }
 
@@ -49,13 +60,17 @@ void PickApiGui::OnApiFilterUpdated(UINT uNotifyCode, int nID, CWindow wndCtl)
 	if (indexDll == CB_ERR)
 		return;
 
+    DWORD_PTR moduleIndex = ComboDllSelect.GetItemData(indexDll);
+    if(moduleIndex >= moduleList.size())
+        return;
+
 	std::vector<ApiInfo *> newApis;
 	WCHAR filter[MAX_PATH];
 
 	int lenFilter = EditApiFilter.GetWindowText(filter, _countof(filter));
 	if(lenFilter > 0)
 	{
-		const std::vector<ApiInfo *> &apis = moduleList[indexDll].apiList;
+		const std::vector<ApiInfo *> &apis = moduleList[moduleIndex].apiList;
 
 		for (size_t i = 0; i < apis.size(); i++)
 		{
@@ -81,10 +96,12 @@ void PickApiGui::OnApiFilterUpdated(UINT uNotifyCode, int nID, CWindow wndCtl)
 	}
 	else
 	{
-		newApis = moduleList[indexDll].apiList;
+		newApis = moduleList[moduleIndex].apiList;
 	}
 
 	fillApiListBox(ListApiSelect, newApis);
+    if(ListApiSelect.GetCount() > 0)
+        ListApiSelect.SetCurSel(0);
 }
 
 void PickApiGui::actionApiSelected()
@@ -102,7 +119,8 @@ void PickApiGui::actionApiSelected()
 	if (indexDll != CB_ERR && indexApi != LB_ERR)
 	{
 		selectedApi = (ApiInfo *)ListApiSelect.GetItemData(indexApi);
-		EndDialog(1);
+        if(selectedApi)
+		    EndDialog(1);
 	}
 }
 
@@ -110,10 +128,30 @@ void PickApiGui::fillDllComboBox(CComboBox& combo)
 {
 	combo.ResetContent();
 
+	bool addedWithApis = false;
 	for (size_t i = 0; i < moduleList.size(); i++)
 	{
-		combo.AddString(moduleList[i].fullPath);
+        if(moduleList[i].apiList.empty())
+            continue;
+		int item = combo.AddString(moduleList[i].fullPath);
+        if(item != CB_ERR && item != CB_ERRSPACE)
+        {
+            combo.SetItemData(item, (DWORD_PTR)i);
+            addedWithApis = true;
+        }
 	}
+
+    // If parsing failed for every module, still show the modules so the user can
+    // see the failure instead of an empty dialog.
+    if(!addedWithApis)
+    {
+        for (size_t i = 0; i < moduleList.size(); i++)
+        {
+            int item = combo.AddString(moduleList[i].fullPath);
+            if(item != CB_ERR && item != CB_ERRSPACE)
+                combo.SetItemData(item, (DWORD_PTR)i);
+        }
+    }
 }
 
 void PickApiGui::fillApiListBox(CListBox& list, const std::vector<ApiInfo *> &apis)
@@ -135,6 +173,7 @@ void PickApiGui::fillApiListBox(CListBox& list, const std::vector<ApiInfo *> &ap
 			swprintf_s(buf, L"#%04X", api->ordinal);
 			item = list.AddString(buf);
 		}
-		list.SetItemData(item, (DWORD_PTR)api);
+		if(item != LB_ERR && item != LB_ERRSPACE)
+            list.SetItemData(item, (DWORD_PTR)api);
 	}
 }
