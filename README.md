@@ -2,6 +2,8 @@
 
 > ScyllaX 是基于原版 Scylla 的 PE dump / imports reconstruction 工具改造版。当前仓库将 Scylla 的 WTL 图形界面保留下来，并新增 `ScyllaXBridgePlugin`，让 ScyllaX 通过 x64dbg/x32dbg 插件桥接当前正在调试的进程，而不是由 ScyllaX 自己枚举进程并 `OpenProcess` 读取目标内存。
 
+[![绿色免安装下载](https://img.shields.io/badge/Download-Latest_Release-blue?style=for-the-badge)](https://github.com/Project-HashCat/ScyllaX/releases/latest)
+
 ## 特性
 
 - 支持 x86 / x64 PE 目标。
@@ -87,8 +89,13 @@ ScyllaX-master/
 ├─ COMPILING                           原版 Scylla 编译说明
 └─ LICENSE                             GPL-3.0 license
 ```
+## 系统要求
 
-## 运行环境
+- Windows 10 / Windows 11, Windows 7 可用, 但是不建议.
+- 有x96dbg
+
+
+## 编译环境
 
 ### 必需
 

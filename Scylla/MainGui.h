@@ -310,6 +310,7 @@ protected:
 	// Misc
 
 	bool getCurrentModulePath(WCHAR * buffer, size_t bufferSize);
+	bool isCurrentTargetDll() const;
 	void checkSuspendProcess();
 	void setDialogIATAddressAndSize( DWORD_PTR addressIAT, DWORD sizeIAT );
 	void InitDllStartWithPreSelect( PGUI_DLL_PARAMETER guiParam );

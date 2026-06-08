@@ -26,6 +26,22 @@ const WCHAR MainGui::filterTxt[]    = L"Text file (*.txt)\0*.txt\0All files\0*.*
 const WCHAR MainGui::filterXml[]    = L"XML file (*.xml)\0*.xml\0All files\0*.*\0";
 const WCHAR MainGui::filterMem[]    = L"MEM file (*.mem)\0*.mem\0All files\0*.*\0";
 
+static bool hasFileExtension(const WCHAR* path, const WCHAR* extension)
+{
+	if(!path || !*path || !extension || !*extension)
+		return false;
+
+	const WCHAR* dot = wcsrchr(path, L'.');
+	if(!dot)
+		return false;
+
+	const WCHAR* slash = wcsrchr(path, L'\\');
+	if(slash && dot < slash)
+		return false;
+
+	return _wcsicmp(dot, extension) == 0;
+}
+
 MainGui::MainGui() : selectedProcess(0), isProcessSuspended(false), importsHandling(TreeImports), TreeImportsSubclass(this, IDC_TREE_IMPORTS)
 {
 	/*
@@ -1193,24 +1209,29 @@ void MainGui::dumpSectionActionHandler()
 	const WCHAR * fileFilter;
 	const WCHAR * defExtension;
 	PeParser * peFile = 0;
+	const bool dumpAsDll = isCurrentTargetDll();
 
 	dlgDumpSection.entryPoint = EditOEPAddress.GetValue();
 
-	if (ProcessAccessHelp::selectedModule)
+	if (dumpAsDll)
 	{
-		//dump DLL
 		fileFilter = filterDll;
 		defExtension = L"dll";
+	}
+	else
+	{
+		fileFilter = filterExe;
+		defExtension = L"exe";
+	}
 
+	if (ProcessAccessHelp::selectedModule)
+	{
 		dlgDumpSection.imageBase = ProcessAccessHelp::selectedModule->modBaseAddr;
 		//get it from gui
 		wcscpy_s(dlgDumpSection.fullpath, ProcessAccessHelp::selectedModule->fullPath);
 	}
 	else
 	{
-		fileFilter = filterExe;
-		defExtension = L"exe";
-
 		dlgDumpSection.imageBase = ProcessAccessHelp::targetImageBase;
 		//get it from gui
 		wcscpy_s(dlgDumpSection.fullpath, selectedProcess->fullPath);
@@ -1263,8 +1284,9 @@ void MainGui::dumpActionHandler()
 	DWORD_PTR entrypoint = 0;
 	WCHAR * filename = 0;
 	PeParser * peFile = 0;
+	const bool dumpAsDll = isCurrentTargetDll();
 
-	if (ProcessAccessHelp::selectedModule)
+	if (dumpAsDll)
 	{
 		fileFilter = filterDll;
 		defExtension = L"dll";
@@ -1412,17 +1434,18 @@ void MainGui::dumpFixActionHandler()
 	const WCHAR * fileFilter;
 	DWORD_PTR modBase = 0;
 	DWORD_PTR entrypoint = EditOEPAddress.GetValue();
+	const bool dumpAsDll = isCurrentTargetDll();
 
 	if (ProcessAccessHelp::selectedModule)
 	{
 		modBase = ProcessAccessHelp::selectedModule->modBaseAddr;
-		fileFilter = filterDll;
 	}
 	else
 	{
 		modBase = ProcessAccessHelp::targetImageBase;
-		fileFilter = filterExe;
 	}
+
+	fileFilter = dumpAsDll ? filterDll : filterExe;
 
 	getCurrentModulePath(stringBuffer, _countof(stringBuffer));
 	if (showFileDialog(selectedFilePath, false, NULL, fileFilter, NULL, stringBuffer))
@@ -1665,6 +1688,53 @@ bool MainGui::getCurrentModulePath(WCHAR * buffer, size_t bufferSize)
 	return true;
 }
 
+bool MainGui::isCurrentTargetDll() const
+{
+	if (ProcessAccessHelp::selectedModule)
+		return true;
+
+	for (size_t i = 0; i < ProcessAccessHelp::moduleList.size(); i++)
+	{
+		const ModuleInfo& module = ProcessAccessHelp::moduleList[i];
+		if (module.modBaseAddr == ProcessAccessHelp::targetImageBase)
+		{
+			if (hasFileExtension(module.fullPath, L".dll"))
+				return true;
+			break;
+		}
+	}
+
+	if (selectedProcess)
+	{
+		if (hasFileExtension(selectedProcess->fullPath, L".dll") || hasFileExtension(selectedProcess->filename, L".dll"))
+			return true;
+	}
+
+	if (ProcessAccessHelp::hProcess && ProcessAccessHelp::targetImageBase)
+	{
+		IMAGE_DOS_HEADER dosHeader = {0};
+		if (ProcessAccessHelp::readMemoryFromProcess(ProcessAccessHelp::targetImageBase, sizeof(dosHeader), &dosHeader) &&
+			dosHeader.e_magic == IMAGE_DOS_SIGNATURE &&
+			dosHeader.e_lfanew > 0 &&
+			dosHeader.e_lfanew < 0x1000)
+		{
+			const DWORD_PTR ntHeaderAddress = ProcessAccessHelp::targetImageBase + (DWORD_PTR)dosHeader.e_lfanew;
+			DWORD ntSignature = 0;
+			if (ProcessAccessHelp::readMemoryFromProcess(ntHeaderAddress, sizeof(ntSignature), &ntSignature) &&
+				ntSignature == IMAGE_NT_SIGNATURE)
+			{
+				IMAGE_FILE_HEADER fileHeader = {0};
+				if (ProcessAccessHelp::readMemoryFromProcess(ntHeaderAddress + sizeof(DWORD), sizeof(fileHeader), &fileHeader))
+				{
+					return (fileHeader.Characteristics & IMAGE_FILE_DLL) != 0;
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
 void MainGui::checkSuspendProcess()
 {
 	if (Scylla::config[SUSPEND_PROCESS_FOR_DUMPING].isTrue())
@@ -1721,6 +1791,7 @@ bool MainGui::getCurrentDefaultDumpFilename( WCHAR * buffer, size_t bufferSize )
         return false;
 
     WCHAR * fullPath;
+    const bool dumpAsDll = isCurrentTargetDll();
 
     if(ProcessAccessHelp::selectedModule)
     {
@@ -1742,7 +1813,7 @@ bool MainGui::getCurrentDefaultDumpFilename( WCHAR * buffer, size_t bufferSize )
         {
             *temp = 0;
 
-            if(ProcessAccessHelp::selectedModule)
+            if(dumpAsDll)
             {
                 wcscat_s(buffer, bufferSize, L"_dump.dll");
             }
